@@ -34,11 +34,14 @@
     </section>
 
     <!-- 每日推荐 -->
-    <section class="section" v-if="store.dailySongs.length > 0">
-      <h2 class="section-title">每日推荐</h2>
+    <section class="section" v-if="dailyAvailable.length > 0">
+      <h2 class="section-title">
+        每日推荐
+        <SourceTabs v-model="dailySource" :sources="dailyAvailable" />
+      </h2>
       <div class="daily-grid">
         <div
-          v-for="song in store.dailySongs.slice(0, 12)"
+          v-for="song in (store.dailySongs[dailySourceSafe] ?? []).slice(0, 12)"
           :key="song.id"
           class="daily-card hover-scale"
           @click="store.playSong(song)"
@@ -51,11 +54,14 @@
     </section>
 
     <!-- 推荐歌单 -->
-    <section class="section" v-if="store.recommendPlaylists.length > 0">
-      <h2 class="section-title">推荐歌单</h2>
+    <section class="section" v-if="recommendAvailable.length > 0">
+      <h2 class="section-title">
+        推荐歌单
+        <SourceTabs v-model="recommendSource" :sources="recommendAvailable" />
+      </h2>
       <div class="playlist-grid">
         <RouterLink
-          v-for="playlist in store.recommendPlaylists"
+          v-for="playlist in (store.recommendPlaylists[recommendSourceSafe] ?? [])"
           :key="playlist.id"
           :to="`/playlist/${playlist.id}?platform=${playlist.platform}`"
           class="playlist-card hover-scale"
@@ -67,10 +73,11 @@
     </section>
 
     <!-- 我的歌单 -->
-    <section class="section" v-if="store.userPlaylists.length > 0">
+    <section class="section" v-if="userAvailable.length > 0">
       <h2 class="section-title">
         我的歌单
-        <span class="section-count">{{ store.userPlaylists.length }}</span>
+        <span class="section-count">{{ currentUserPlaylists.length }}</span>
+        <SourceTabs v-model="userSource" :sources="userAvailable" />
       </h2>
       <div class="playlist-grid">
         <RouterLink
@@ -85,12 +92,12 @@
         </RouterLink>
       </div>
       <button
-        v-if="store.userPlaylists.length > USER_PLAYLIST_LIMIT"
+        v-if="currentUserPlaylists.length > USER_PLAYLIST_LIMIT"
         class="expand-btn"
         @click="userPlaylistsExpanded = !userPlaylistsExpanded"
       >
         <Icon :icon="userPlaylistsExpanded ? 'mdi:chevron-up' : 'mdi:chevron-down'" />
-        {{ userPlaylistsExpanded ? '收起' : `展开全部 ${store.userPlaylists.length} 个歌单` }}
+        {{ userPlaylistsExpanded ? '收起' : `展开全部 ${currentUserPlaylists.length} 个歌单` }}
       </button>
     </section>
 
@@ -117,19 +124,68 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import axios from 'axios';
-import { usePlayerStore, type Song } from '../stores/player.js';
+import { usePlayerStore, type Song, type Source } from '../stores/player.js';
+import { loadTabSource, saveTabSource } from '../stores/sourceTabs.js';
 import CoverArt from '../components/CoverArt.vue';
+import SourceTabs from '../components/SourceTabs.vue';
 
 const store = usePlayerStore();
 const USER_PLAYLIST_LIMIT = 20;
 const userPlaylistsExpanded = ref(false);
+
+// Available sources per section.
+const recommendAvailable = computed<Source[]>(() => {
+  const s: Source[] = ['netease'];
+  if (store.authStatus.qq) s.push('qq');
+  return s;
+});
+const dailyAvailable = computed<Source[]>(() => {
+  const s: Source[] = [];
+  if (store.authStatus.netease) s.push('netease');
+  if (store.authStatus.qq) s.push('qq');
+  return s;
+});
+const userAvailable = computed<Source[]>(() => {
+  const s: Source[] = [];
+  if (store.authStatus.netease) s.push('netease');
+  if (store.authStatus.qq) s.push('qq');
+  return s;
+});
+
+// Persisted active source per section.
+const recommendSource = ref<Source>(loadTabSource('home.recommend'));
+const dailySource     = ref<Source>(loadTabSource('home.daily'));
+const userSource      = ref<Source>(loadTabSource('home.user'));
+
+watch(recommendSource, (v) => saveTabSource('home.recommend', v));
+watch(dailySource,     (v) => saveTabSource('home.daily',     v));
+watch(userSource,      (v) => saveTabSource('home.user',      v));
+
+// Fallback when persisted source is no longer available.
+const recommendSourceSafe = computed<Source>(() =>
+  recommendAvailable.value.includes(recommendSource.value)
+    ? recommendSource.value
+    : recommendAvailable.value[0] ?? 'netease'
+);
+const dailySourceSafe = computed<Source>(() =>
+  dailyAvailable.value.includes(dailySource.value)
+    ? dailySource.value
+    : dailyAvailable.value[0] ?? 'netease'
+);
+const userSourceSafe = computed<Source>(() =>
+  userAvailable.value.includes(userSource.value)
+    ? userSource.value
+    : userAvailable.value[0] ?? 'netease'
+);
+
+const currentUserPlaylists = computed(() => store.userPlaylists[userSourceSafe.value] ?? []);
 const visibleUserPlaylists = computed(() =>
   userPlaylistsExpanded.value
-    ? store.userPlaylists
-    : store.userPlaylists.slice(0, USER_PLAYLIST_LIMIT)
+    ? currentUserPlaylists.value
+    : currentUserPlaylists.value.slice(0, USER_PLAYLIST_LIMIT)
 );
 
 async function playFm() {

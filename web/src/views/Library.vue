@@ -3,14 +3,15 @@
     <h1 class="page-title">音乐库</h1>
 
     <!-- 我的歌单 -->
-    <section class="section" v-if="store.userPlaylists.length > 0">
+    <section class="section" v-if="userAvailable.length > 0">
       <h2 class="section-title">
         我的歌单
-        <span class="section-count">{{ store.userPlaylists.length }}</span>
+        <span class="section-count">{{ currentUserPlaylists.length }}</span>
+        <SourceTabs v-model="userSource" :sources="userAvailable" />
       </h2>
       <div class="playlist-grid">
         <RouterLink
-          v-for="pl in store.userPlaylists"
+          v-for="pl in currentUserPlaylists"
           :key="pl.id"
           :to="`/playlist/${pl.id}?platform=${pl.platform}`"
           class="playlist-card hover-scale"
@@ -40,23 +41,7 @@
       </div>
     </section>
 
-    <!-- 我的收藏 -->
-    <section class="section" v-if="liked.length > 0">
-      <h2 class="section-title">我的收藏</h2>
-      <div class="song-list">
-        <SongCard
-          v-for="(song, i) in liked.slice(0, 10)"
-          :key="`fav-${song.id}-${i}`"
-          :song="song"
-          :index="i + 1"
-          :active="store.currentSong?.id === song.id"
-          @play="store.play(song.name, song.platform)"
-          @add="store.addToQueue(song.name, song.platform)"
-        />
-      </div>
-    </section>
-
-    <div v-if="!historyLoading && store.userPlaylists.length === 0 && history.length === 0 && liked.length === 0" class="empty-state">
+    <div v-if="!historyLoading && userAvailable.length === 0 && history.length === 0" class="empty-state">
       <Icon icon="mdi:music-box-outline" class="empty-icon" />
       <div>登录网易云或QQ音乐后，这里将显示你的歌单和播放记录</div>
     </div>
@@ -64,18 +49,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import axios from 'axios';
-import { usePlayerStore, type Song } from '../stores/player.js';
+import { usePlayerStore, type Song, type Source } from '../stores/player.js';
+import { loadTabSource, saveTabSource } from '../stores/sourceTabs.js';
 import CoverArt from '../components/CoverArt.vue';
 import SongCard from '../components/SongCard.vue';
+import SourceTabs from '../components/SourceTabs.vue';
 
 const store = usePlayerStore();
 
 const history = ref<Song[]>([]);
-const liked = ref<Song[]>([]);
 const historyLoading = ref(true);
+
+const userAvailable = computed<Source[]>(() => {
+  const s: Source[] = [];
+  if (store.authStatus.netease) s.push('netease');
+  if (store.authStatus.qq) s.push('qq');
+  return s;
+});
+
+const userSource = ref<Source>(loadTabSource('library.user'));
+watch(userSource, (v) => saveTabSource('library.user', v));
+
+const userSourceSafe = computed<Source>(() =>
+  userAvailable.value.includes(userSource.value)
+    ? userSource.value
+    : userAvailable.value[0] ?? 'netease'
+);
+
+const currentUserPlaylists = computed(() => store.userPlaylists[userSourceSafe.value] ?? []);
 
 onMounted(async () => {
   if (!store.activeBotId) {
@@ -90,13 +94,6 @@ onMounted(async () => {
       history.value = res.data.history ?? [];
     } catch {
       // API may not be ready
-    }
-
-    try {
-      const res = await axios.get('/api/music/user/liked');
-      liked.value = res.data.songs ?? [];
-    } catch {
-      // Liked songs API may not exist yet
     }
   }
 

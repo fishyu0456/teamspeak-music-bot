@@ -11,6 +11,8 @@ export interface Song {
   platform: 'netease' | 'qq' | 'bilibili' | 'youtube';
 }
 
+export type Source = 'netease' | 'qq';
+
 export interface BotStatus {
   id: string;
   name: string;
@@ -54,11 +56,12 @@ export const usePlayerStore = defineStore('player', {
     timings: {} as Record<string, TimingState>,
     theme: 'dark' as 'dark' | 'light',
 
-    // Home page cache
-    recommendPlaylists: [] as PlaylistItem[],
-    dailySongs: [] as Song[],
-    userPlaylists: [] as PlaylistItem[],
+    // Home page cache, split by source
+    recommendPlaylists: { netease: [] as PlaylistItem[], qq: [] as PlaylistItem[] },
+    dailySongs:         { netease: [] as Song[],         qq: [] as Song[] },
+    userPlaylists:      { netease: [] as PlaylistItem[], qq: [] as PlaylistItem[] },
     bilibiliPopular: [] as Song[],
+    authStatus: { netease: false, qq: false },
     lastFetchTime: 0,
   }),
 
@@ -354,24 +357,70 @@ export const usePlayerStore = defineStore('player', {
         return;
       }
 
-      const [playlistRes, dailyRes, userRes, biliRes] = await Promise.allSettled([
-        axios.get('/api/music/recommend/playlists'),
-        axios.get('/api/music/recommend/songs'),
-        axios.get('/api/music/user/playlists'),
-        axios.get('/api/music/bilibili/popular?limit=12'),
+      // 1. Fetch auth status for both platforms first.
+      const [neAuthRes, qqAuthRes] = await Promise.allSettled([
+        axios.get('/api/auth/status', { params: { platform: 'netease' } }),
+        axios.get('/api/auth/status', { params: { platform: 'qq' } }),
+      ]);
+      this.authStatus.netease =
+        neAuthRes.status === 'fulfilled' && !!neAuthRes.value.data?.loggedIn;
+      this.authStatus.qq =
+        qqAuthRes.status === 'fulfilled' && !!qqAuthRes.value.data?.loggedIn;
+
+      // 2. NetEase data: recommend playlists work anonymously; daily/user
+      // playlists need login but Promise.allSettled isolates failures.
+      const neteasePromises = [
+        axios.get('/api/music/recommend/playlists', { params: { platform: 'netease' } }),
+        axios.get('/api/music/recommend/songs',     { params: { platform: 'netease' } }),
+        axios.get('/api/music/user/playlists',      { params: { platform: 'netease' } }),
+      ];
+
+      // 3. QQ data: only fetch when QQ is logged in. When not logged in,
+      // resolve to empty payloads so the same indexed handling works.
+      const emptyPlaylists = { data: { playlists: [] } };
+      const emptySongs     = { data: { songs: [] } };
+      const qqPromises = this.authStatus.qq
+        ? [
+            axios.get('/api/music/recommend/playlists', { params: { platform: 'qq' } }),
+            axios.get('/api/music/recommend/songs',     { params: { platform: 'qq' } }),
+            axios.get('/api/music/user/playlists',      { params: { platform: 'qq' } }),
+          ]
+        : [
+            Promise.resolve(emptyPlaylists),
+            Promise.resolve(emptySongs),
+            Promise.resolve(emptyPlaylists),
+          ];
+
+      const biliPromise = axios.get('/api/music/bilibili/popular?limit=12');
+
+      const results = await Promise.allSettled([
+        ...neteasePromises,
+        ...qqPromises,
+        biliPromise,
       ]);
 
-      if (playlistRes.status === 'fulfilled') {
-        this.recommendPlaylists = playlistRes.value.data.playlists;
+      const [neRecPL, neDaily, neUserPL, qqRecPL, qqDaily, qqUserPL, bili] = results;
+
+      if (neRecPL.status === 'fulfilled') {
+        this.recommendPlaylists.netease = neRecPL.value.data.playlists ?? [];
       }
-      if (dailyRes.status === 'fulfilled') {
-        this.dailySongs = dailyRes.value.data.songs;
+      if (neDaily.status === 'fulfilled') {
+        this.dailySongs.netease = neDaily.value.data.songs ?? [];
       }
-      if (userRes.status === 'fulfilled') {
-        this.userPlaylists = userRes.value.data.playlists;
+      if (neUserPL.status === 'fulfilled') {
+        this.userPlaylists.netease = neUserPL.value.data.playlists ?? [];
       }
-      if (biliRes.status === 'fulfilled') {
-        this.bilibiliPopular = biliRes.value.data.songs;
+      if (qqRecPL.status === 'fulfilled') {
+        this.recommendPlaylists.qq = qqRecPL.value.data.playlists ?? [];
+      }
+      if (qqDaily.status === 'fulfilled') {
+        this.dailySongs.qq = qqDaily.value.data.songs ?? [];
+      }
+      if (qqUserPL.status === 'fulfilled') {
+        this.userPlaylists.qq = qqUserPL.value.data.playlists ?? [];
+      }
+      if (bili.status === 'fulfilled') {
+        this.bilibiliPopular = bili.value.data.songs ?? [];
       }
 
       this.lastFetchTime = Date.now();
