@@ -28,9 +28,10 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue';
 import CoverArt from './CoverArt.vue';
+import { Song } from '../stores/player.js';
 
 defineProps<{
-  song: { id: string; name: string; artist: string; album: string; duration: number; coverUrl: string; platform: string };
+  song: Song;
   index: number;
   active?: boolean;
 }>();

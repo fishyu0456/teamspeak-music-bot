@@ -41,7 +41,7 @@
           v-for="song in store.dailySongs.slice(0, 12)"
           :key="song.id"
           class="daily-card hover-scale"
-          @click="store.playById(song.id, song.platform)"
+          @click="store.playSong(song)"
         >
           <CoverArt :url="song.coverUrl" :size="120" :radius="10" :show-shadow="true" />
           <div class="daily-name">{{ song.name }}</div>
@@ -105,7 +105,7 @@
           v-for="song in store.bilibiliPopular.slice(0, 12)"
           :key="song.id"
           class="daily-card hover-scale"
-          @click="store.playById(song.id, song.platform)"
+          @click="store.playSong(song)"
         >
           <CoverArt :url="song.coverUrl" :size="120" :radius="10" :show-shadow="true" />
           <div class="daily-name">{{ song.name }}</div>

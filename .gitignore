@@ -6,5 +6,6 @@ dist/
 config.json
 cookies/
 .superpowers/
+.worktrees/
 /bin/
 scripts/navbar_bigger.png

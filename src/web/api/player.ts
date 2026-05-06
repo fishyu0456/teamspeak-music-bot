@@ -277,35 +277,54 @@ export function createPlayerRouter(
   });
 
   // Play a single song by ID — resolves URL on demand
-  router.post("/:botId/play-by-id", async (req, res) => {
+  router.post("/:botId/play-song", async (req, res) => {
     try {
       const bot = (req as any).bot;
-      const { songId, platform } = req.body;
-      const provider = bot.getProviderFor(
-        platform === "bilibili" || platform === "qq" || platform === "youtube"
-          ? platform
-          : "netease"
-      );
-
-      const song = await provider.getSongDetail(songId);
-      if (!song) {
-        res.json({ message: "Song not found" });
+      const { song } = req.body;
+      if (!song || !song.id || !song.platform) {
+        res.status(400).json({ error: "song object with id and platform is required" });
         return;
       }
-
       const queue = bot.getQueueManager();
       queue.clear();
-      queue.add({ ...song, platform: provider.platform });
+      queue.add(song);
       queue.play();
 
       bot.getPlayer().resetFailures();
       const ok = await bot.resolveAndPlay(queue.current()!);
       if (!ok) {
-        res.json({ message: `Cannot play: ${song.name}` });
+        res.json({ message: `Cannot play: ${song.name || song.id}` });
         return;
       }
 
-      res.json({ message: `Now playing: ${song.name} - ${song.artist}` });
+      res.json({ message: `Now playing: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post("/:botId/add-song", async (req, res) => {
+    try {
+      const bot = (req as any).bot;
+      const { song } = req.body;
+      if (!song || !song.id || !song.platform) {
+        res.status(400).json({ error: "song object with id and platform is required" });
+        return;
+      }
+      const queue = bot.getQueueManager();
+      const wasIdle = bot.getPlayer().getState() === "idle";
+      queue.add(song);
+
+      // If nothing was playing, start this newly-added song immediately.
+      if (wasIdle) {
+        queue.playAt(queue.size() - 1);
+        bot.getPlayer().resetFailures();
+        await bot.resolveAndPlay(queue.current()!);
+        res.json({ message: `Now playing: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` });
+        return;
+      }
+
+      res.json({ message: `Added to queue: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'} (position ${queue.size()})` });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

@@ -19,8 +19,8 @@
         :song="song"
         :index="i + 1"
         :active="store.currentSong?.id === song.id"
-        @play="store.play(song.name, song.platform)"
-        @add="store.addToQueue(song.name, song.platform)"
+        @play="store.playSong(song)"
+        @add="store.addSong(song)"
       />
     </div>
   </div>
@@ -35,7 +35,9 @@ import SongCard from '../components/SongCard.vue';
 
 const store = usePlayerStore();
 
-const history = ref<Array<{ id: string; name: string; artist: string; album: string; duration: number; coverUrl: string; platform: string }>>([]);
+import { Song } from '../stores/player.js';
+
+const history = ref<Song[]>([]);
 const loading = ref(true);
 
 onMounted(async () => {

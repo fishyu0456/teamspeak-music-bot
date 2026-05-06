@@ -3,6 +3,14 @@
     <div class="queue-header">
       <h3 class="queue-title">播放队列</h3>
       <span class="queue-count">{{ botQueue.length }} 首</span>
+      <button 
+        v-if="botQueue.length > 0"
+        class="clear-btn" 
+        @click="clearAndStop" 
+        title="清空队列并停止播放"
+      >
+        <Icon icon="mdi:stop-circle-outline" />
+      </button>
       <button class="close-btn" @click="$emit('close')">
         <Icon icon="mdi:close" />
       </button>
@@ -70,6 +78,15 @@ async function removeSong(index: number) {
     // Ignore
   }
 }
+
+async function clearAndStop() {
+  try {
+    await store.stop();
+    await store.fetchQueue();
+  } catch {
+    // Ignore
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -114,6 +131,14 @@ async function removeSong(index: number) {
   font-size: 18px;
   opacity: 0.6;
   transition: opacity var(--transition-fast);
+  &:hover { opacity: 1; }
+}
+
+.clear-btn {
+  font-size: 18px;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+  color: var(--text-primary);
   &:hover { opacity: 1; }
 }
 

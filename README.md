@@ -254,9 +254,11 @@ sudo systemctl start tsmusicbot
 | `!vol <0-100>` | 设置音量 |
 | `!queue` | 查看播放队列 |
 | `!mode <seq\|loop\|random\|rloop>` | 切换播放模式 |
-| `!playlist <ID>` | 加载歌单 |
+| `!playlist <歌单名或ID>` | 加载歌单（支持名称模糊搜索和 ID） |
+| `!playlist -q <歌单名>` | 从 QQ 音乐搜索并加载歌单 |
 | `!album <ID>` | 加载专辑 |
-| `!fm` | 私人 FM（网易云） |
+| `!artist <歌手名>` | 按歌手循环播放（支持 `-q`/`-b`/`-y`） |
+| `!fm` | 私人 FM（网易云，自动续播） |
 | `!lyrics` | 显示当前歌词 |
 | `!now` | 当前播放信息 |
 | `!vote` | 投票跳过当前歌曲 |
@@ -484,6 +486,13 @@ A：`git pull` 拉取最新代码，然后 `npm install && npm run build && npm 
 - **独立可配置**：6 项功能可通过 REST API（`GET/PUT /api/player/:botId/profile`）独立开关，配置持久化到数据库。
 - **竞争条件防护**：generation 计数器防止快速切歌时旧头像覆盖新头像；UTF-8 字节长度截断中文昵称；文件传输操作带超时保护。
 - **TS3 适配**：描述通过 `clientedit`（非 `clientupdate`）设置，需要 `b_client_modify_description` 权限；昵称和 Away 通过合并的单条 `clientupdate` 避免命令队列超时。
+
+**新命令 & FM 修复**
+
+- **新增 `!artist <歌手名>` 命令**：搜索指定歌手的歌曲并循环播放，支持 `-q`（QQ 音乐）/ `-b`（B站）/ `-y`（YouTube）平台切换。一次加载最多 50 首，自动按歌手名过滤并设为 Loop 模式。
+- **歌单模糊搜索**：`!playlist` 现在支持歌单名称模糊搜索（如 `!playlist 华语经典`），自动匹配公开歌单 + 个人歌单（网易云 + QQ）。纯数字 ID 和 URL 解析保持兼容。
+- **修复 `!fm` 播放中断**：私人 FM 几首歌后静音的 bug 已修复。新增自动续播机制（队列低位自动拉取新歌），播放器健康帧追踪防止临时 URL 失败导致永久静音。
+- **QQ 音乐个人歌单**：QQ Music provider 新增 `getUserPlaylists` 支持，登录后可通过 `!playlist -q <名称>` 模糊搜索个人歌单。
 
 **协议层 & 稳定性**
 

@@ -64,6 +64,7 @@ export class BotInstance extends EventEmitter {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private profileManager: BotProfileManager;
+  private isFmMode = false;
 
   constructor(options: BotInstanceOptions) {
     super();
@@ -259,6 +260,7 @@ export class BotInstance extends EventEmitter {
       "playlist",
       "album",
       "fm",
+      "artist",
     ]);
     if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
       throw new Error("Bot is not connected to TeamSpeak");
@@ -298,6 +300,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdAlbum(cmd);
       case "fm":
         return this.cmdFm();
+      case "artist":
+        return this.cmdArtist(cmd);
       case "vote":
         return this.cmdVote(msg);
       case "lyrics":
@@ -387,6 +391,7 @@ export class BotInstance extends EventEmitter {
 
     const song = result.songs[0];
     this.queue.clear();
+    this.isFmMode = false;
     this.queue.add({ ...song, platform: provider.platform });
     this.queue.play();
 
@@ -438,6 +443,7 @@ export class BotInstance extends EventEmitter {
   private cmdStop(): string {
     this.player.stop();
     this.queue.clear();
+    this.isFmMode = false;
     this.profileManager.onSongChange(null).catch((err) => {
       this.logger.warn({ err }, "Profile restore failed on stop");
     });
@@ -491,6 +497,7 @@ export class BotInstance extends EventEmitter {
   private cmdClear(): string {
     this.player.stop();
     this.queue.clear();
+    this.isFmMode = false;
     this.profileManager.onSongChange(null).catch((err) => {
       this.logger.warn({ err }, "Profile restore failed on clear");
     });
@@ -522,13 +529,48 @@ export class BotInstance extends EventEmitter {
   }
 
   private async cmdPlaylist(cmd: ParsedCommand): Promise<string> {
-    if (!cmd.args) return "Usage: !playlist <playlist ID or URL>";
+    if (!cmd.args) return "Usage: !playlist <playlist name or ID>";
     const provider = this.getProvider(cmd.flags);
+
+    // Determine if input is a numeric ID or a name search
     const id = this.extractId(cmd.args);
-    const songs = await provider.getPlaylistSongs(id);
+    const isNumericId = /^\d+$/.test(cmd.args.trim());
+
+    let playlistId: string;
+
+    if (isNumericId || id !== cmd.args) {
+      // Input is a numeric ID or URL containing an ID — use existing logic
+      playlistId = id;
+    } else {
+      // Name-based search
+      const result = await provider.search(cmd.args);
+      let playlists = result.playlists ?? [];
+
+      // Also search user's personal playlists if logged in
+      if (provider.getUserPlaylists) {
+        try {
+          const userPlaylists = await provider.getUserPlaylists();
+          const query = cmd.args.toLowerCase();
+          const matched = userPlaylists.filter(
+            p => p.name.toLowerCase().includes(query)
+          );
+          // Merge: public results first (API-ranked), then user matches
+          playlists = [...playlists, ...matched];
+        } catch {
+          // User playlists unavailable — continue with public results
+        }
+      }
+
+      if (playlists.length === 0)
+        return `No playlists found for: ${cmd.args}`;
+      playlistId = playlists[0].id;
+    }
+
+    const songs = await provider.getPlaylistSongs(playlistId);
     if (songs.length === 0) return "Playlist is empty or not found";
 
     this.queue.clear();
+    this.isFmMode = false;
     for (const song of songs) {
       this.queue.add({ ...song, platform: provider.platform });
     }
@@ -545,6 +587,7 @@ export class BotInstance extends EventEmitter {
     if (songs.length === 0) return "Album is empty or not found";
 
     this.queue.clear();
+    this.isFmMode = false;
     for (const song of songs) {
       this.queue.add({ ...song, platform: provider.platform });
     }
@@ -566,10 +609,59 @@ export class BotInstance extends EventEmitter {
     for (const song of songs) {
       this.queue.add({ ...song, platform: "netease" });
     }
+    this.queue.setMode(PlayMode.Random);
+    this.isFmMode = true;
+    this.player.resetFailures();
+
     const first = this.queue.play();
     if (first) await this.resolveAndPlay(first);
     this.emit("stateChange");
     return `Personal FM started: ${first?.name ?? "unknown"} - ${first?.artist ?? ""}`;
+  }
+
+  private async cmdArtist(cmd: ParsedCommand): Promise<string> {
+    if (!cmd.args) return "Usage: !artist <artist name>";
+    const provider = this.getProvider(cmd.flags);
+    const result = await provider.search(cmd.args, 50);
+    if (result.songs.length === 0)
+      return `No results found for artist: ${cmd.args}`;
+
+    const query = cmd.args.toLowerCase();
+    let filtered = result.songs.filter(
+      s => s.artist.toLowerCase().includes(query)
+    );
+
+    // Fallback to unfiltered results if filtering drops everything
+    if (filtered.length === 0) {
+      filtered = result.songs.slice(0, 20);
+    }
+
+    this.queue.clear();
+    this.isFmMode = false;
+    for (const song of filtered) {
+      this.queue.add({ ...song, platform: provider.platform });
+    }
+    this.queue.setMode(PlayMode.Loop);
+    this.player.resetFailures();
+
+    const first = this.queue.play();
+    if (first) await this.resolveAndPlay(first);
+    this.emit("stateChange");
+    return `Artist mode: ${cmd.args} — ${filtered.length} songs loaded. Now playing: ${first?.name ?? "unknown"}`;
+  }
+
+  private async refillFm(): Promise<void> {
+    if (!this.isFmMode || !this.neteaseProvider.getPersonalFm) return;
+    try {
+      const songs = await this.neteaseProvider.getPersonalFm();
+      if (songs.length === 0) return;
+      for (const song of songs) {
+        this.queue.add({ ...song, platform: "netease" });
+      }
+      this.logger.debug({ count: songs.length }, "FM queue refilled");
+    } catch (err) {
+      this.logger.error({ err }, "Failed to refill FM queue");
+    }
   }
 
   private async cmdVote(msg?: TS3TextMessage): Promise<string> {
@@ -629,9 +721,12 @@ export class BotInstance extends EventEmitter {
       `${p}vol <0-100>  — Set volume`,
       `${p}queue        — Show queue`,
       `${p}mode <seq|loop|random|rloop> — Play mode`,
-      `${p}playlist <id> — Load playlist`,
+      `${p}playlist <name or id> — Load playlist by name or ID`,
+      `${p}playlist -q <name or id> — Load playlist from QQ Music`,
       `${p}album <id>   — Load album`,
       `${p}fm           — Personal FM (NetEase)`,
+      `${p}artist <name> — Play songs by artist (loop)`,
+      `${p}artist -q <name> — Artist loop from QQ Music`,
       `${p}vote         — Vote to skip`,
       `${p}lyrics       — Show lyrics`,
       `${p}now          — Current song info`,
@@ -661,10 +756,25 @@ export class BotInstance extends EventEmitter {
         if (!started) {
           this.player.stop();
           this.profileManager.onSongChange(null).catch(() => {});
+        } else if (this.isFmMode && this.queue.unplayedCount() <= 3) {
+          // Proactive refill: when queue is running low, fetch more FM songs
+          this.refillFm().catch(err => this.logger.error({ err }, "Proactive FM refill failed"));
         }
       } else {
-        this.player.stop();
-        this.profileManager.onSongChange(null).catch(() => {});
+        // Queue exhausted — in FM Random mode, refill and continue
+        if (this.isFmMode) {
+          await this.refillFm();
+          const refillNext = this.queue.next();
+          if (refillNext) {
+            await this.resolveAndPlay(refillNext);
+          } else {
+            this.player.stop();
+            this.profileManager.onSongChange(null).catch(() => {});
+          }
+        } else {
+          this.player.stop();
+          this.profileManager.onSongChange(null).catch(() => {});
+        }
       }
       this.emit("stateChange");
     } finally {

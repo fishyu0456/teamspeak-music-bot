@@ -8,7 +8,7 @@ export interface Song {
   album: string;
   duration: number;
   coverUrl: string;
-  platform: 'netease' | 'qq';
+  platform: 'netease' | 'qq' | 'bilibili' | 'youtube';
 }
 
 export interface BotStatus {
@@ -259,6 +259,13 @@ export const usePlayerStore = defineStore('player', {
       this._syncAfterAction();
     },
 
+    async playSong(song: Song) {
+      if (!this.activeBotId) return;
+      await axios.post(`/api/player/${this.activeBotId}/play-song`, { song });
+      this._setTiming(this.activeBotId, { serverElapsed: 0 });
+      this._syncAfterAction();
+    },
+
     async addToQueue(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
       await axios.post(`/api/player/${this.activeBotId}/add`, { query, platform });
@@ -267,6 +274,11 @@ export const usePlayerStore = defineStore('player', {
     async addToQueueById(songId: string, platform = 'netease') {
       if (!this.activeBotId) return;
       await axios.post(`/api/player/${this.activeBotId}/add-by-id`, { songId, platform });
+    },
+
+    async addSong(song: Song) {
+      if (!this.activeBotId) return;
+      await axios.post(`/api/player/${this.activeBotId}/add-song`, { song });
     },
 
     async playPlaylist(playlistId: string, platform = 'netease') {

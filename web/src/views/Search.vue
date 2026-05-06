@@ -27,8 +27,8 @@
         :song="song"
         :index="i + 1"
         :active="store.currentSong?.id === song.id"
-        @play="store.playById(song.id, song.platform)"
-        @add="store.addToQueueById(song.id, song.platform)"
+        @play="store.playSong(song)"
+        @add="store.addSong(song)"
       />
     </div>
 
@@ -50,7 +50,9 @@ const store = usePlayerStore();
 const route = useRoute();
 
 const query = ref((route.query.q as string) || '');
-const results = ref<Array<{ id: string; name: string; artist: string; album: string; duration: number; coverUrl: string; platform: string }>>([]);
+import { Song } from '../stores/player.js';
+
+const results = ref<Song[]>([]);
 const loading = ref(false);
 const searched = ref(false);
 

@@ -161,4 +161,9 @@ export class PlayQueue {
   getCurrentIndex(): number {
     return this.currentIndex;
   }
+
+  /** Number of songs not yet played in Random mode. */
+  unplayedCount(): number {
+    return this.songs.length - this.playedIndices.size;
+  }
 }

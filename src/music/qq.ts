@@ -10,6 +10,14 @@ import type {
 } from "./provider.js";
 import { parseLyrics } from "./netease.js";
 
+// Direct QQ Music API client — bypasses the local API server for search
+// because @sansenjian/qq-music-api still uses the broken c.y.qq.com endpoint.
+const qqDirectApi = axios.create({
+  baseURL: "https://u.y.qq.com",
+  timeout: 10000,
+  headers: { referer: "https://y.qq.com" },
+});
+
 export class QQMusicProvider implements MusicProvider {
   readonly platform = "qq" as const;
   private api: AxiosInstance;
@@ -36,33 +44,58 @@ export class QQMusicProvider implements MusicProvider {
   }
 
   async search(query: string, limit = 20): Promise<SearchResult> {
-    const res = await this.api.get("/getSearchByKey", {
-      params: { key: query, pageSize: limit, ...this.cookieParams },
+    const reqData = JSON.stringify({
+      req_0: {
+        module: "music.search.SearchCgiService",
+        method: "DoSearchForQQMusicDesktop",
+        param: {
+          searchid: "1",
+          query,
+          num_per_page: Math.min(limit, 50),
+        },
+      },
     });
+    const res = await qqDirectApi.get("/cgi-bin/musicu.fcg", {
+      params: { format: "json", data: reqData },
+    });
+    const list: any[] =
+      res.data?.req_0?.data?.body?.song?.list ?? [];
 
-    const songs: Song[] = (res.data?.response?.data?.song?.list ?? []).map(
-      (s: any) => ({
-        id: String(s.songmid ?? s.songid),
-        name: s.songname ?? "",
-        artist: (s.singer ?? []).map((a: any) => a.name).join(" / "),
-        album: s.albumname ?? "",
-        duration: s.interval ?? 0,
-        coverUrl: s.albummid
-          ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.albummid}.jpg`
-          : "",
-        platform: "qq",
-      })
-    );
+    const songs: Song[] = list.map((s: any) => ({
+      id: String(s.mid ?? s.id),
+      name: s.title ?? s.name ?? "",
+      artist: (s.singer ?? []).map((a: any) => a.name).join(" / "),
+      album: s.album?.name ?? s.album?.title ?? "",
+      duration: s.interval ?? 0,
+      coverUrl: s.album?.mid
+        ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.album.mid}.jpg`
+        : "",
+      platform: "qq",
+    }));
 
     return { songs, playlists: [], albums: [] };
   }
 
-  async getSongUrl(songId: string, _quality?: string): Promise<string | null> {
-    const res = await this.api.get("/getMusicPlay", {
-      params: { songmid: songId, ...this.cookieParams },
-    });
-    const playUrl = res.data?.data?.playUrl?.[songId];
-    return playUrl?.url || null;
+  async getSongUrl(songId: string, quality?: string): Promise<string | null> {
+    try {
+      const res = await this.api.get("/getMusicPlay", {
+        params: { songmid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+      });
+      const playUrl = res.data?.data?.playUrl?.[songId];
+      if (playUrl?.url) return playUrl.url;
+    } catch {
+      // try with songid
+      try {
+        const res = await this.api.get("/getMusicPlay", {
+          params: { songid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+        });
+        const playUrl = res.data?.data?.playUrl?.[songId];
+        if (playUrl?.url) return playUrl.url;
+      } catch {
+        // ignore
+      }
+    }
+    return null;
   }
 
   async getSongDetail(songId: string): Promise<Song | null> {
@@ -115,12 +148,14 @@ export class QQMusicProvider implements MusicProvider {
     const cdlist = res.data?.response?.cdlist ?? [];
     if (cdlist.length === 0) return [];
     return (cdlist[0].songlist ?? []).map((s: any) => ({
-      id: String(s.songmid ?? s.songid),
+      id: String(s.mid ?? s.songmid ?? s.songid),
       name: s.songname ?? s.name ?? "",
       artist: (s.singer ?? []).map((a: any) => a.name).join(" / "),
       album: s.albumname ?? "",
       duration: s.interval ?? 0,
-      coverUrl: s.albummid
+      coverUrl: s.album?.mid
+        ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.album.mid}.jpg`
+        : s.albummid
         ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.albummid}.jpg`
         : "",
       platform: "qq",
@@ -253,6 +288,28 @@ export class QQMusicProvider implements MusicProvider {
       };
     } catch {
       return { loggedIn: false };
+    }
+  }
+
+  async getUserPlaylists(): Promise<Playlist[]> {
+    if (!this.cookie) return [];
+    const uinMatch = /(?:^|; )uin=o?0?(\d+)/.exec(this.cookie);
+    const uin = uinMatch ? uinMatch[1] : "";
+    if (!uin) return [];
+    try {
+      const res = await this.api.get("/user/getUserPlaylists", {
+        params: { uin, ...this.cookieParams },
+      });
+      if (res.data?.response?.code !== 0) return [];
+      return (res.data?.response?.data?.playlists ?? []).map((p: any) => ({
+        id: String(p.dissid ?? p.id ?? ""),
+        name: p.dissname ?? p.name ?? "",
+        coverUrl: p.imgurl ?? p.coverUrl ?? "",
+        songCount: p.song_count ?? p.listennum ?? 0,
+        platform: "qq",
+      }));
+    } catch {
+      return [];
     }
   }
 }
