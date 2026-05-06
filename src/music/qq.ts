@@ -122,38 +122,41 @@ export class QQMusicProvider implements MusicProvider {
    * current user — a sequential retry loop wastes time guessing.
    *
    * The wrapper's /getMusicPlay accepts a comma-separated songmid list
-   * and resolves all of them in a single upstream call (~2-3s for 100+
-   * songs), so this is much cheaper than per-song probing.
+   * and resolves all of them in a single upstream call. We chunk to keep
+   * the URL well under typical 8KB query-string limits and to keep per-
+   * request latency bounded (~2-3s per 100 mids).
    *
    * Returns:
    *   - non-null Set: authoritative result. Empty Set means all songs are
    *     unplayable; non-empty means filter to those mids.
-   *   - null: the batch endpoint failed (timeout/exception). Caller
-   *     should fall back to sequential retry rather than treating as
-   *     "all unplayable", since we don't actually know.
-   *
-   * TODO: songIds with 1000+ entries may exceed URL length; chunk if
-   * we ever support that scale.
+   *   - null: every chunk failed. Caller should fall back to sequential
+   *     retry rather than treating as "all unplayable".
    */
   async getPlayableSongIds(songIds: string[]): Promise<Set<string> | null> {
     if (songIds.length === 0) return new Set();
-    try {
-      const res = await this.api.get("/getMusicPlay", {
-        params: { songmid: songIds.join(","), quality: this.quality, ...this.cookieParams },
-      });
-      const playUrlMap: Record<string, { url?: string }> | undefined =
-        res.data?.data?.playUrl;
-      // Distinguish "endpoint returned no playUrl object at all" (treat
-      // as failure → null) from "returned an empty/all-unplayable map".
-      if (!playUrlMap) return null;
-      const playable = new Set<string>();
-      for (const [mid, info] of Object.entries(playUrlMap)) {
-        if (info?.url) playable.add(mid);
+
+    const CHUNK = 100;          // ~14 chars/mid * 100 + commas ≈ 1.5KB
+    const playable = new Set<string>();
+    let allChunksFailed = true;
+    for (let i = 0; i < songIds.length; i += CHUNK) {
+      const slice = songIds.slice(i, i + CHUNK);
+      try {
+        const res = await this.api.get("/getMusicPlay", {
+          params: { songmid: slice.join(","), quality: this.quality, ...this.cookieParams },
+        });
+        const playUrlMap: Record<string, { url?: string }> | undefined =
+          res.data?.data?.playUrl;
+        if (!playUrlMap) continue; // chunk-level failure, try next
+        allChunksFailed = false;
+        for (const [mid, info] of Object.entries(playUrlMap)) {
+          if (info?.url) playable.add(mid);
+        }
+      } catch {
+        // chunk-level failure — keep going so a transient error on one
+        // chunk doesn't poison the whole batch.
       }
-      return playable;
-    } catch {
-      return null;
     }
+    return allChunksFailed ? null : playable;
   }
 
   async getSongDetail(songId: string): Promise<Song | null> {
@@ -433,30 +436,47 @@ export class QQMusicProvider implements MusicProvider {
     const pSkeyMatch = /(?:^|; )p_skey=([^;]+)/.exec(this.cookie);
     if (!pSkeyMatch) return [];
     const gtk = computeGtk(pSkeyMatch[1]);
+
+    const PAGE_SIZE = 30;
+    const MAX_PAGES = 10;       // 300-playlist hard cap; should cover any sane user
+    const all: Playlist[] = [];
     try {
-      const res = await qqFavApi.get("/fav/fcgi-bin/fcg_get_profile_order_asset.fcg", {
-        params: {
-          ct: 20,
-          cid: 205360956,
-          userid: uin,
-          reqtype: 3,
-          sin: 0,
-          ein: 29,
-          g_tk: gtk,
-          format: "json",
-        },
-        headers: { Cookie: this.cookie },
-      });
-      if (res.data?.code !== 0) return [];
-      return (res.data?.data?.cdlist ?? []).map((p: any) => ({
-        id: String(p.dissid ?? ""),
-        name: p.dissname ?? "",
-        coverUrl: p.logo ?? "",
-        songCount: p.songnum ?? 0,
-        platform: "qq" as const,
-      }));
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const sin = page * PAGE_SIZE;
+        const ein = sin + PAGE_SIZE - 1;
+        const res = await qqFavApi.get("/fav/fcgi-bin/fcg_get_profile_order_asset.fcg", {
+          params: {
+            ct: 20,
+            cid: 205360956,
+            userid: uin,
+            reqtype: 3,
+            sin,
+            ein,
+            g_tk: gtk,
+            format: "json",
+          },
+          headers: { Cookie: this.cookie },
+        });
+        if (res.data?.code !== 0) break;
+        const list: any[] = res.data?.data?.cdlist ?? [];
+        for (const p of list) {
+          all.push({
+            id: String(p.dissid ?? ""),
+            name: p.dissname ?? "",
+            coverUrl: p.logo ?? "",
+            songCount: p.songnum ?? 0,
+            platform: "qq",
+          });
+        }
+        // Stop when upstream signals no more pages, or when this page is
+        // short (also indicates end). has_more is the canonical signal.
+        const hasMore = res.data?.data?.has_more === 1 || res.data?.data?.has_more === true;
+        if (!hasMore || list.length < PAGE_SIZE) break;
+      }
     } catch {
-      return [];
+      // Return whatever we got so far on partial failure rather than dropping
+      // earlier pages.
     }
+    return all;
   }
 }

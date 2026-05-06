@@ -5,6 +5,7 @@
       <RouterView />
     </main>
     <Player />
+    <Toast />
 
     <!-- Mobile mini player -->
     <div v-if="currentSong" class="m-player" @click="router.push('/lyrics')">
@@ -55,6 +56,7 @@ import { useWebSocket } from './composables/useWebSocket.js';
 import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
 import CoverArt from './components/CoverArt.vue';
+import Toast from './components/Toast.vue';
 
 const playerStore = usePlayerStore();
 const theme = computed(() => playerStore.theme);

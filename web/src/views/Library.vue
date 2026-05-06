@@ -6,7 +6,7 @@
     <section class="section" v-if="userAvailable.length > 0">
       <h2 class="section-title">
         我的歌单
-        <span class="section-count">{{ currentUserPlaylists.length }}</span>
+        <span v-if="currentUserPlaylists.length > 0" class="section-count">{{ currentUserPlaylists.length }}</span>
         <SourceTabs v-model="userSource" :sources="userAvailable" />
       </h2>
       <div class="playlist-grid">

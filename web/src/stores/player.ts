@@ -63,6 +63,10 @@ export const usePlayerStore = defineStore('player', {
     bilibiliPopular: [] as Song[],
     authStatus: { netease: false, qq: false },
     lastFetchTime: 0,
+
+    // Transient notification for surfacing failures (e.g., "song not playable")
+    // to a global Toast. Bumped `id` triggers re-render of the same message.
+    notification: null as { id: number; message: string; type: 'error' | 'info' } | null,
   }),
 
   getters: {
@@ -269,9 +273,16 @@ export const usePlayerStore = defineStore('player', {
       this._syncAfterAction();
     },
 
+    notify(message: string, type: 'error' | 'info' = 'info') {
+      this.notification = { id: Date.now(), message, type };
+    },
+
     async playSong(song: Song) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-song`, { song });
+      const res = await axios.post(`/api/player/${this.activeBotId}/play-song`, { song });
+      if (res.data?.ok === false && res.data?.message) {
+        this.notify(res.data.message, 'error');
+      }
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
@@ -293,7 +304,10 @@ export const usePlayerStore = defineStore('player', {
 
     async playPlaylist(playlistId: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+      const res = await axios.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+      if (res.data?.message) {
+        this.notify(res.data.message, res.data.ok === false ? 'error' : 'info');
+      }
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
@@ -360,19 +374,30 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async fetchHomeData() {
-      if (this.lastFetchTime > 0 && Date.now() - this.lastFetchTime < HOME_CACHE_TTL) {
-        return;
-      }
-
-      // 1. Fetch auth status for both platforms first.
+      // Always check auth status first — if it changed since the cached
+      // fetch (e.g., user logged in/out as a different account), the
+      // cached playlists belong to a different user and we MUST refetch.
       const [neAuthRes, qqAuthRes] = await Promise.allSettled([
         axios.get('/api/auth/status', { params: { platform: 'netease' } }),
         axios.get('/api/auth/status', { params: { platform: 'qq' } }),
       ]);
-      this.authStatus.netease =
-        neAuthRes.status === 'fulfilled' && !!neAuthRes.value.data?.loggedIn;
-      this.authStatus.qq =
-        qqAuthRes.status === 'fulfilled' && !!qqAuthRes.value.data?.loggedIn;
+      const newAuth = {
+        netease: neAuthRes.status === 'fulfilled' && !!neAuthRes.value.data?.loggedIn,
+        qq:      qqAuthRes.status === 'fulfilled' && !!qqAuthRes.value.data?.loggedIn,
+      };
+      const authChanged =
+        newAuth.netease !== this.authStatus.netease || newAuth.qq !== this.authStatus.qq;
+      this.authStatus.netease = newAuth.netease;
+      this.authStatus.qq = newAuth.qq;
+
+      // Cache hit only if auth is unchanged AND within TTL.
+      if (
+        !authChanged &&
+        this.lastFetchTime > 0 &&
+        Date.now() - this.lastFetchTime < HOME_CACHE_TTL
+      ) {
+        return;
+      }
 
       // 2. NetEase data: recommend playlists work anonymously; daily/user
       // playlists need login but Promise.allSettled isolates failures.

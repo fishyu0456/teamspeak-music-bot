@@ -1,15 +1,20 @@
 <template>
-  <div v-if="sources.length >= 2" class="source-tabs">
-    <button
-      v-for="src in sources"
-      :key="src"
-      type="button"
-      class="source-tab"
-      :class="{ active: src === modelValue }"
-      @click="$emit('update:modelValue', src)"
-    >
-      {{ LABELS[src] }}
-    </button>
+  <div v-if="sources.length > 0" class="source-tabs">
+    <template v-if="sources.length >= 2">
+      <button
+        v-for="src in sources"
+        :key="src"
+        type="button"
+        class="source-tab"
+        :class="{ active: src === modelValue }"
+        @click="$emit('update:modelValue', src)"
+      >
+        {{ LABELS[src] }}
+      </button>
+    </template>
+    <span v-else class="source-tab-label" :title="`数据来自${LABELS[sources[0]]}`">
+      {{ LABELS[sources[0]] }}
+    </span>
   </div>
 </template>
 
@@ -61,6 +66,17 @@ defineEmits<{
     background: var(--color-primary-12);
     font-weight: var(--fw-semi);
   }
+}
+
+// Single-source mode: not interactive, but tells the user which platform
+// they're looking at instead of leaving them guessing.
+.source-tab-label {
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-tertiary);
+  background: var(--hover-bg);
+  border-radius: var(--radius-sm);
 }
 
 @media (max-width: 768px) {

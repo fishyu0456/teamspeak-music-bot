@@ -268,7 +268,7 @@ export function createPlayerRouter(
         // the sequential retry path, which still has a chance.
       }
       if (queueable.length === 0) {
-        res.json({ message: `Loaded ${totalCount} songs but none were playable (likely copyright/region restrictions).` });
+        res.json({ ok: false, message: `歌单 ${totalCount} 首歌曲均无版权可播放（区域/版权限制）` });
         return;
       }
 
@@ -300,12 +300,12 @@ export function createPlayerRouter(
 
       const playing = queue.current();
       const loadedMsg = queueable.length < totalCount
-        ? `Loaded ${queueable.length} of ${totalCount} songs (rest are copyright/region restricted)`
-        : `Loaded ${queueable.length} songs`;
+        ? `已加载 ${queueable.length}/${totalCount} 首（其余区域/版权限制）`
+        : `已加载 ${queueable.length} 首`;
       if (started && playing) {
-        res.json({ message: `${loadedMsg}. Now playing: ${playing.name}` });
+        res.json({ ok: true, message: `${loadedMsg}，正在播放：${playing.name}` });
       } else {
-        res.json({ message: `${loadedMsg}, but couldn't start playback.` });
+        res.json({ ok: false, message: `${loadedMsg}，但无法开始播放。` });
       }
     } catch (err) {
       logger.error({ err }, "Play playlist failed");
@@ -330,11 +330,11 @@ export function createPlayerRouter(
       bot.getPlayer().resetFailures();
       const ok = await bot.resolveAndPlay(queue.current()!);
       if (!ok) {
-        res.json({ message: `Cannot play: ${song.name || song.id}` });
+        res.json({ ok: false, message: `无法播放「${song.name || song.id}」（区域/版权限制）` });
         return;
       }
 
-      res.json({ message: `Now playing: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` });
+      res.json({ ok: true, message: `正在播放：${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
