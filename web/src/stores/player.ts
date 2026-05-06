@@ -287,6 +287,16 @@ export const usePlayerStore = defineStore('player', {
       this._syncAfterAction();
     },
 
+    async playNextSong(song: Song) {
+      if (!this.activeBotId) return;
+      const res = await axios.post(`/api/player/${this.activeBotId}/play-next-song`, { song });
+      if (res.data?.message) {
+        this.notify(res.data.message, res.data.ok === false ? 'error' : 'info');
+      }
+      // Refresh queue so the inserted item shows up in the side panel
+      this.fetchQueue();
+    },
+
     async addToQueue(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
       await axios.post(`/api/player/${this.activeBotId}/add`, { query, platform });
