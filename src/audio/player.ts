@@ -279,8 +279,12 @@ export class AudioPlayer extends EventEmitter {
       this.emit("error", err);
     });
 
+    // Mark playing but DO NOT start the frame loop here — the loop's
+    // "no ffmpeg + empty buffer → trackEnd" branch would fire on the very
+    // first tick, before the PowerShell download even completes. The
+    // frame loop is started inside spawnFfmpegFromFile() once ffmpeg is
+    // alive and producing PCM.
     this.state = "playing";
-    this.startFrameLoop();
   }
 
   private spawnFfmpegFromFile(tempFile: string, seekSeconds: number, sessionId: number): void {
@@ -329,6 +333,9 @@ export class AudioPlayer extends EventEmitter {
         this.emit("error", err);
       }
     });
+
+    // Now that ffmpeg is producing PCM, run the frame loop.
+    this.startFrameLoop();
   }
 
   stop(): void {
