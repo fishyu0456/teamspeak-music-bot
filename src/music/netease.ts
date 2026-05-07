@@ -8,6 +8,7 @@ import type {
   SearchResult,
   QrCodeResult,
   AuthStatus,
+  Album,
 } from "./provider.js";
 
 export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
@@ -55,6 +56,18 @@ export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
   return lines.sort((a, b) => a.time - b.time);
 }
 
+export function mapNeteaseAlbums(raw: any[] | null | undefined): Album[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((a) => ({
+    id: String(a.id),
+    name: a.name ?? "",
+    artist: (a.artists ?? []).map((x: any) => x.name).join(" / "),
+    coverUrl: a.picUrl ?? "",
+    songCount: a.size ?? 0,
+    platform: "netease",
+  }));
+}
+
 // NetEase quality levels: standard(128k) higher(192k) exhigh(320k) lossless(flac) hires(hi-res) jyeffect jymaster
 export const NETEASE_QUALITY_LEVELS = [
   { value: "standard", label: "标准 (128kbps)", bitrate: 128 },
@@ -91,7 +104,7 @@ export class NeteaseProvider implements MusicProvider {
   }
 
   async search(query: string, limit = 20): Promise<SearchResult> {
-    const [songRes, playlistRes] = await Promise.all([
+    const [songRes, playlistRes, albumRes] = await Promise.all([
       this.api.get("/cloudsearch", {
         params: { keywords: query, type: 1, limit, ...this.cookieParams },
       }),
@@ -102,6 +115,9 @@ export class NeteaseProvider implements MusicProvider {
           limit: 5,
           ...this.cookieParams,
         },
+      }),
+      this.api.get("/cloudsearch", {
+        params: { keywords: query, type: 10, limit: 5, ...this.cookieParams },
       }),
     ]);
 
@@ -127,7 +143,9 @@ export class NeteaseProvider implements MusicProvider {
       platform: "netease",
     }));
 
-    return { songs, playlists, albums: [] };
+    const albums = mapNeteaseAlbums(albumRes.data?.result?.albums);
+
+    return { songs, playlists, albums };
   }
 
   async getSongUrl(songId: string, quality?: string): Promise<string | null> {

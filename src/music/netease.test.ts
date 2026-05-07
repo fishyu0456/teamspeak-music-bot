@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLyrics } from "./netease.js";
+import { parseLyrics, mapNeteaseAlbums } from "./netease.js";
 
 describe("NetEase adapter", () => {
   it("parses LRC format lyrics", () => {
@@ -27,5 +27,33 @@ describe("NetEase adapter", () => {
     const lines = parseLyrics(lrc, tlyric);
     expect(lines[0].text).toBe("Hello world");
     expect(lines[0].translation).toBe("你好世界");
+  });
+
+  it("mapNeteaseAlbums maps raw cloudsearch albums to Album shape", () => {
+    const raw = [
+      {
+        id: 42,
+        name: "Album A",
+        picUrl: "https://x/p.jpg",
+        artists: [{ name: "Artist X" }, { name: "Featured Y" }],
+        size: 12,
+      },
+      {
+        id: 99,
+        name: "Album B",
+        picUrl: "",
+        artists: [],
+      },
+    ];
+    expect(mapNeteaseAlbums(raw)).toEqual([
+      { id: "42", name: "Album A", artist: "Artist X / Featured Y", coverUrl: "https://x/p.jpg", songCount: 12, platform: "netease" },
+      { id: "99", name: "Album B", artist: "", coverUrl: "", songCount: 0, platform: "netease" },
+    ]);
+  });
+
+  it("mapNeteaseAlbums returns [] for empty/null input", () => {
+    expect(mapNeteaseAlbums([])).toEqual([]);
+    expect(mapNeteaseAlbums(null as any)).toEqual([]);
+    expect(mapNeteaseAlbums(undefined as any)).toEqual([]);
   });
 });
