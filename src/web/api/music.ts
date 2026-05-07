@@ -52,14 +52,20 @@ export function createMusicRouter(
       ]);
 
       const songs = [
-        ...(neteaseResult.status === "fulfilled"
-          ? neteaseResult.value.songs
-          : []),
+        ...(neteaseResult.status === "fulfilled" ? neteaseResult.value.songs : []),
         ...(qqResult.status === "fulfilled" ? qqResult.value.songs : []),
         ...(bilibiliResult.status === "fulfilled" ? bilibiliResult.value.songs : []),
       ];
+      const albums = [
+        ...(neteaseResult.status === "fulfilled" ? neteaseResult.value.albums : []),
+        ...(qqResult.status === "fulfilled" ? qqResult.value.albums : []),
+      ];
+      const playlists = [
+        ...(neteaseResult.status === "fulfilled" ? neteaseResult.value.playlists : []),
+        ...(qqResult.status === "fulfilled" ? qqResult.value.playlists : []),
+      ];
 
-      res.json({ songs });
+      res.json({ songs, albums, playlists });
     } catch (err) {
       logger.error({ err }, "Unified search failed");
       res.status(500).json({ error: (err as Error).message });
